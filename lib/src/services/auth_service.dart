@@ -48,6 +48,32 @@ class AuthService {
   final Logger _log;
   final Uuid _uuid;
 
+  /// Validates a token, retrieves the user, and ensures user data exists.
+  ///
+  /// This method orchestrates the process of:
+  /// 1. Validating the token using the [AuthTokenService].
+  /// 2. If the user is found, calling [_ensureUserDataExists] to guarantee
+  ///    that related documents like settings and preferences are present.
+  ///
+  /// This is the primary method that should be used by middleware to get a
+  /// fully validated user object whose data integrity is confirmed.
+  ///
+  /// Returns the [User] if the token is valid and the user exists.
+  /// Returns `null` if the token is invalid or the user is not found.
+  /// Throws [HtHttpException] or its subtypes on failure.
+  Future<User?> getUserFromToken(String token) async {
+    final user = await _authTokenService.validateToken(token);
+
+    if (user != null) {
+      // Ensure that the essential user-specific documents (settings,
+      // preferences) exist for the user, creating them with default values
+      // if they are missing.
+      await _ensureUserDataExists(user);
+    }
+
+    return user;
+  }
+
   /// Initiates the email sign-in process.
   ///
   /// This method is context-aware based on the [isDashboardLogin] flag.
