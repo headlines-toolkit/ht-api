@@ -48,6 +48,9 @@ class AuthService {
   final Logger _log;
   final Uuid _uuid;
 
+  // A simple in-memory lock to prevent race conditions during user data creation.
+  final Set<String> _userCreationLocks = {};
+
   /// Validates a token, retrieves the user, and ensures user data exists.
   ///
   /// This method orchestrates the process of:
@@ -627,56 +630,88 @@ class AuthService {
   ///
   /// This method is crucial for maintaining data integrity, especially for users
   /// who might have been created before these documents were part of the standard
-  /// user creation process.
+  /// user creation process. It is designed to be robust against race conditions.
   Future<void> _ensureUserDataExists(User user) async {
-    // Check for UserAppSettings
+    // If a creation process for this user is already underway, wait briefly.
+    // This prevents multiple requests from trying to create the same documents.
+    while (_userCreationLocks.contains(user.id)) {
+      await Future<void>.delayed(const Duration(milliseconds: 100));
+    }
+
+    // First, perform a quick check without locking. If the data already exists,
+    // we can exit early. This is an optimization for the common case where the
+    // user is already fully set up.
     try {
       await _userAppSettingsRepository.read(id: user.id, userId: user.id);
+      await _userContentPreferencesRepository.read(id: user.id, userId: user.id);
+      return; // Both documents exist, nothing more to do.
     } on NotFoundException {
+      // At least one document is missing. Proceed to the synchronized creation logic.
       _log.info(
-        'UserAppSettings not found for user ${user.id}. Creating with defaults.',
-      );
-      final defaultAppSettings = UserAppSettings(
-        id: user.id,
-        displaySettings: const DisplaySettings(
-          baseTheme: AppBaseTheme.system,
-          accentTheme: AppAccentTheme.defaultBlue,
-          fontFamily: 'SystemDefault',
-          textScaleFactor: AppTextScaleFactor.medium,
-          fontWeight: AppFontWeight.regular,
-        ),
-        language: 'en',
-        feedPreferences: const FeedDisplayPreferences(
-          headlineDensity: HeadlineDensity.standard,
-          headlineImageStyle: HeadlineImageStyle.largeThumbnail,
-          showSourceInHeadlineFeed: true,
-          showPublishDateInHeadlineFeed: true,
-        ),
-      );
-      await _userAppSettingsRepository.create(
-        item: defaultAppSettings,
-        userId: user.id,
+        'User data check for ${user.id} found missing documents. '
+        'Proceeding to creation lock.',
       );
     }
 
-    // Check for UserContentPreferences
+    // Acquire a lock to ensure only one request handles creation.
+    _userCreationLocks.add(user.id);
     try {
-      await _userContentPreferencesRepository.read(id: user.id, userId: user.id);
-    } on NotFoundException {
-      _log.info(
-        'UserContentPreferences not found for user ${user.id}. Creating with defaults.',
-      );
-      final defaultUserPreferences = UserContentPreferences(
-        id: user.id,
-        followedCountries: const [],
-        followedSources: const [],
-        followedTopics: const [],
-        savedHeadlines: const [],
-      );
-      await _userContentPreferencesRepository.create(
-        item: defaultUserPreferences,
-        userId: user.id,
-      );
+      // --- Re-check and create within the lock ---
+      // It's crucial to re-check inside the lock in case another request
+      // created the documents while this one was waiting for the lock.
+
+      // Check for UserAppSettings
+      try {
+        await _userAppSettingsRepository.read(id: user.id, userId: user.id);
+      } on NotFoundException {
+        _log.info(
+          'UserAppSettings not found for user ${user.id}. Creating with defaults.',
+        );
+        final defaultAppSettings = UserAppSettings(
+          id: user.id,
+          displaySettings: const DisplaySettings(
+            baseTheme: AppBaseTheme.system,
+            accentTheme: AppAccentTheme.defaultBlue,
+            fontFamily: 'SystemDefault',
+            textScaleFactor: AppTextScaleFactor.medium,
+            fontWeight: AppFontWeight.regular,
+          ),
+          language: 'en',
+          feedPreferences: const FeedDisplayPreferences(
+            headlineDensity: HeadlineDensity.standard,
+            headlineImageStyle: HeadlineImageStyle.largeThumbnail,
+            showSourceInHeadlineFeed: true,
+            showPublishDateInHeadlineFeed: true,
+          ),
+        );
+        await _userAppSettingsRepository.create(
+          item: defaultAppSettings,
+          userId: user.id,
+        );
+      }
+
+      // Check for UserContentPreferences
+      try {
+        await _userContentPreferencesRepository.read(id: user.id, userId: user.id);
+      } on NotFoundException {
+        _log.info(
+          'UserContentPreferences not found for user ${user.id}. Creating with defaults.',
+        );
+        final defaultUserPreferences = UserContentPreferences(
+          id: user.id,
+          followedCountries: const [],
+          followedSources: const [],
+          followedTopics: const [],
+          savedHeadlines: const [],
+        );
+        await _userContentPreferencesRepository.create(
+          item: defaultUserPreferences,
+          userId: user.id,
+        );
+      }
+    } finally {
+      // Always release the lock.
+      _userCreationLocks.remove(user.id);
     }
   }
 }
