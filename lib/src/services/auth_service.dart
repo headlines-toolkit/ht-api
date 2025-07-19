@@ -16,7 +16,7 @@ import 'package:uuid/uuid.dart';
 /// {@endtemplate}
 class AuthService {
   /// {@macro auth_service}
-  const AuthService({
+  AuthService({
     required HtDataRepository<User> userRepository,
     required AuthTokenService authTokenService,
     required VerificationCodeStorageService verificationCodeStorageService,
