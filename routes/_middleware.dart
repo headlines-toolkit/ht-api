@@ -45,7 +45,6 @@ Handler middleware(Handler handler) {
   return handler
       // --- Core Middleware ---
       // These run after all dependencies have been provided.
-      .use(errorHandler())
       .use(requestLogger())
       // --- Request ID Provider ---
       // This middleware provides a unique ID for each request for tracing.

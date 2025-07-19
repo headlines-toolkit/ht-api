@@ -2,6 +2,7 @@ import 'dart:io' show Platform; // To read environment variables
 
 import 'package:dart_frog/dart_frog.dart';
 import 'package:ht_api/src/middlewares/authentication_middleware.dart';
+import 'package:ht_api/src/middlewares/error_handler.dart';
 import 'package:logging/logging.dart';
 import 'package:shelf_cors_headers/shelf_cors_headers.dart' as shelf_cors;
 
@@ -66,11 +67,16 @@ Handler middleware(Handler handler) {
             },
           ),
         );
-        final corsHandler = corsMiddleware(handler);
+
+        // The errorHandler is now also part of this scope.
+        final errorHandlerMiddleware = errorHandler();
 
         return (context) {
-          _log.info('[REQ_LIFECYCLE] Entering CORS middleware...');
-          return corsHandler(context);
+          _log.info('[REQ_LIFECYCLE] Entering CORS and Error Handling scope...');
+          // By wrapping the errorHandlerMiddleware inside the corsMiddleware,
+          // we ensure that any response, including errors caught by the
+          // handler, will have CORS headers applied.
+          return corsMiddleware(errorHandlerMiddleware(handler))(context);
         };
       });
 }
